@@ -21,11 +21,20 @@ export interface AppendLogOptions {
   readonly onError?: (error: unknown) => void;
 }
 
+export interface AppendLogReadOptions {
+  /**
+   * Lenient mode: when set, a corrupted middle line is skipped and reported
+   * through this callback instead of throwing `AppendLogCorruptedError`.
+   * A torn final line is always dropped silently.
+   */
+  readonly onCorruptedLine?: (lineNumber: number, error: unknown) => void;
+}
+
 export interface IAppendLogStore {
   readonly _serviceBrand: undefined;
 
   append<R>(scope: string, key: string, record: R, options?: AppendLogOptions): void;
-  read<R>(scope: string, key: string): AsyncIterable<R>;
+  read<R>(scope: string, key: string, options?: AppendLogReadOptions): AsyncIterable<R>;
   rewrite<R>(scope: string, key: string, records: readonly R[]): Promise<void>;
   flush(): Promise<void>;
   close(): Promise<void>;

@@ -364,6 +364,36 @@ describe('WireService readJournal', () => {
     }
   });
 
+  it('skips corrupted log lines and reports an aggregated warning', async () => {
+    const storage = new InMemoryStorageService();
+    const localIx = disposables.add(new TestInstantiationService());
+    localIx.stub(IFileSystemStorageService, storage);
+    localIx.set(IAppendLogStore, new SyncDescriptor(AppendLogStore));
+    const localLog = localIx.get(IAppendLogStore);
+    const key = 'corrupted-lines';
+    const scope = testWireScope(SCOPE, key);
+    const metadata = { type: 'metadata', protocol_version: WIRE_PROTOCOL_VERSION, created_at: 1 };
+    const ok = { type: 'wire.test.ok', time: 3 };
+    const raw = `${JSON.stringify(metadata)}\nGARBAGE\nALSO_GARBAGE\n${JSON.stringify(ok)}\n`;
+    await storage.append(scope, AGENT_WIRE_RECORD_KEY, new TextEncoder().encode(raw));
+    const stub = wireOverLog(localLog, key);
+
+    const unexpected: unknown[] = [];
+    setUnexpectedErrorHandler((error) => unexpected.push(error));
+    try {
+      const yielded = await collect(stub.readJournal());
+
+      expect(yielded).toEqual([metadata, ok]);
+      expect(unexpected).toHaveLength(1);
+      expect(unexpected[0]).toMatchObject({
+        code: 'wire.corrupted_lines',
+        details: { scope, key: AGENT_WIRE_RECORD_KEY, count: 2 },
+      });
+    } finally {
+      resetUnexpectedErrorHandler();
+    }
+  });
+
   it('throws when the journal version has no migration path', async () => {
     const stub = wireOverLog(
       recordingWireLog([{ type: 'metadata', protocol_version: '0.9', created_at: 1 }]),

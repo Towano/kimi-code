@@ -7,6 +7,7 @@ import {
   ISessionIndex,
   IWireService,
   createContextTranscriptReducer,
+  onUnexpectedError,
   resumeSessionById,
   type ContextMessage,
   type ContextTranscript,
@@ -166,10 +167,22 @@ async function readTranscript(core: Scope, agent: IAgentScopeHandle): Promise<Co
   await agent.accessor.get(IWireService).flush();
   const scope = agent.accessor.get(IAgentScopeContext).scope();
   const reducer = createContextTranscriptReducer();
+  let corruptedLineCount = 0;
   for await (const record of core.accessor
     .get(IAppendLogStore)
-    .read<WireRecord>(scope, AGENT_WIRE_RECORD_KEY)) {
+    .read<WireRecord>(scope, AGENT_WIRE_RECORD_KEY, {
+      onCorruptedLine: () => {
+        corruptedLineCount++;
+      },
+    })) {
     reducer.add(record);
+  }
+  if (corruptedLineCount > 0) {
+    onUnexpectedError(
+      new Error(
+        `Skipped ${corruptedLineCount} corrupted wire log ${corruptedLineCount === 1 ? 'line' : 'lines'} while reading transcript for ${scope}`,
+      ),
+    );
   }
   return reducer.result();
 }

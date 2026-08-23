@@ -78,7 +78,12 @@ export class WireService extends Service implements IWireService {
   }
 
   async *readJournal(): AsyncIterable<WireRecord> {
-    const source = this.log.read<WireRecord>(this.wireScope, AGENT_WIRE_RECORD_KEY);
+    let corruptedLineCount = 0;
+    const source = this.log.read<WireRecord>(this.wireScope, AGENT_WIRE_RECORD_KEY, {
+      onCorruptedLine: () => {
+        corruptedLineCount++;
+      },
+    });
     let migrations: readonly WireMigration[] = [];
     let rewrittenRecords: WireRecord[] | undefined;
     let newerWireVersion = false;
@@ -128,6 +133,9 @@ export class WireService extends Service implements IWireService {
     if (!hasRecords) {
       rewrittenRecords = [createWireMetadataRecord()];
     }
+    if (corruptedLineCount > 0) {
+      this.reportCorruptedLines(corruptedLineCount);
+    }
     if (rewrittenRecords !== undefined) {
       await this.log.rewrite(this.wireScope, AGENT_WIRE_RECORD_KEY, rewrittenRecords);
     }
@@ -148,6 +156,16 @@ export class WireService extends Service implements IWireService {
             ? `Malformed wire record type '${type}' skipped during restore`
             : `Unknown wire record type '${type}' skipped during restore`,
         { details: { type, index } },
+      ),
+    );
+  }
+
+  private reportCorruptedLines(count: number): void {
+    onUnexpectedError(
+      new WireError(
+        WireErrors.codes.WIRE_CORRUPTED_LINES,
+        `Skipped ${count} corrupted wire log ${count === 1 ? 'line' : 'lines'} during restore`,
+        { details: { scope: this.wireScope, key: AGENT_WIRE_RECORD_KEY, count } },
       ),
     );
   }

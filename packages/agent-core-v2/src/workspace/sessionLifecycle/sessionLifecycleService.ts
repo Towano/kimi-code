@@ -9,6 +9,7 @@ import {
   type ISessionScopeHandle,
 } from '#/_base/di/scope';
 import { unwrapErrorCause } from '#/_base/errors/errors';
+import { onUnexpectedError } from '#/_base/errors/unexpectedError';
 import { AsyncEmitter, Emitter, type Event, type IWaitUntil } from '#/_base/event';
 import { drainLogCloses } from '#/_base/log/logService';
 import { DEFAULT_PLAN_MODE_SECTION } from '#/features/plan/configSection';
@@ -51,6 +52,7 @@ import {
   createWireMetadataRecord,
   type WireRecord,
 } from '#/wire/record';
+import { WireError, WireErrors } from '#/wire/errors';
 import { IModelCatalog } from '#/kosong/model/catalog';
 import { IModelService } from '#/kosong/model/model';
 import { IProviderService } from '#/kosong/provider/provider';
@@ -663,12 +665,28 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
         await agentHandle.accessor.get(IEventDispatcher).flush();
       }
     }
-    return collect(
+    let corruptedLineCount = 0;
+    const records = await collect(
       this.appendLogStore.read<WireRecord>(
         agentScopeOf(sessionScopeOf(this.handlerScope, sourceSessionId), agentId),
         AGENT_WIRE_RECORD_KEY,
+        {
+          onCorruptedLine: () => {
+            corruptedLineCount++;
+          },
+        },
       ),
     );
+    if (corruptedLineCount > 0) {
+      onUnexpectedError(
+        new WireError(
+          WireErrors.codes.WIRE_CORRUPTED_LINES,
+          `Skipped ${corruptedLineCount} corrupted wire log ${corruptedLineCount === 1 ? 'line' : 'lines'} while copying agent '${agentId}' from session ${sourceSessionId}`,
+          { details: { sourceSessionId, agentId, count: corruptedLineCount } },
+        ),
+      );
+    }
+    return records;
   }
 
   private async pruneTruncatedForkFiles(

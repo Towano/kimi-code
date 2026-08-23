@@ -5,6 +5,7 @@ export const WireErrors = {
   codes: {
     WIRE_UNKNOWN_RECORD: 'wire.unknown_record',
     WIRE_MIGRATION_MISSING: 'wire.migration_missing',
+    WIRE_CORRUPTED_LINES: 'wire.corrupted_lines',
     RECORDS_WRITE_FAILED: 'records.write_failed',
   },
   info: {
@@ -19,6 +20,12 @@ export const WireErrors = {
       retryable: false,
       public: true,
       action: 'The wire file predates the supported migration chain; start a new session.',
+    },
+    'wire.corrupted_lines': {
+      title: 'Corrupted wire log lines skipped',
+      retryable: false,
+      public: true,
+      action: 'The corrupted lines were dropped; the session continues without them.',
     },
     'records.write_failed': {
       title: 'Wire journal write failed',

@@ -7,6 +7,7 @@ import {
   AppendLogCorruptedError,
   IAppendLogStore,
   type AppendLogOptions,
+  type AppendLogReadOptions,
 } from '#/persistence/interface/appendLogStore';
 
 const textEncoder = new TextEncoder();
@@ -48,7 +49,7 @@ export class AppendLogStore implements IAppendLogStore {
     this.scheduleFlush(scope, key, state);
   }
 
-  async *read<R>(scope: string, key: string): AsyncIterable<R> {
+  async *read<R>(scope: string, key: string, options?: AppendLogReadOptions): AsyncIterable<R> {
     await this.flushLog(scope, key);
     const textDecoder = new TextDecoder();
     let pending = '';
@@ -60,7 +61,7 @@ export class AppendLogStore implements IAppendLogStore {
         const raw = pending.slice(0, newlineIndex);
         pending = pending.slice(newlineIndex + 1);
         lineNumber++;
-        const record = this.parseLine<R>(raw, scope, key, lineNumber, false);
+        const record = this.parseLine<R>(raw, scope, key, lineNumber, false, options?.onCorruptedLine);
         if (record !== undefined) yield record;
         newlineIndex = pending.indexOf('\n');
       }
@@ -79,6 +80,7 @@ export class AppendLogStore implements IAppendLogStore {
     key: string,
     lineNumber: number,
     allowTruncated: boolean,
+    onCorruptedLine?: (lineNumber: number, error: unknown) => void,
   ): R | undefined {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     if (line.length === 0) return undefined;
@@ -86,6 +88,10 @@ export class AppendLogStore implements IAppendLogStore {
       return JSON.parse(line) as R;
     } catch (error) {
       if (allowTruncated) return undefined;
+      if (onCorruptedLine !== undefined) {
+        onCorruptedLine(lineNumber, error);
+        return undefined;
+      }
       throw new AppendLogCorruptedError(scope, key, lineNumber, error);
     }
   }

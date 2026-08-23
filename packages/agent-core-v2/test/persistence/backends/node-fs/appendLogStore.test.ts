@@ -634,6 +634,39 @@ describe('AppendLogStore', () => {
     });
   });
 
+  it('skips corrupted middle lines and reports them when onCorruptedLine is provided', async () => {
+    const raw = `${JSON.stringify({ n: 1 })}\nGARBAGE\n${JSON.stringify({ n: 2 })}\nALSO_GARBAGE\n${JSON.stringify({ n: 3 })}\n`;
+    await storage.append(SCOPE, KEY, enc.encode(raw));
+
+    const corrupted: Array<{ lineNumber: number; error: unknown }> = [];
+    const out: Rec[] = [];
+    for await (const r of record.read<Rec>(SCOPE, KEY, {
+      onCorruptedLine: (lineNumber, error) => corrupted.push({ lineNumber, error }),
+    })) {
+      out.push(r);
+    }
+    expect(out).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+    expect(corrupted.map((entry) => entry.lineNumber)).toEqual([2, 4]);
+    for (const entry of corrupted) {
+      expect(entry.error).toBeInstanceOf(SyntaxError);
+    }
+  });
+
+  it('still drops a torn final line silently when onCorruptedLine is provided', async () => {
+    const raw = `${JSON.stringify({ n: 1 })}\n${JSON.stringify({ n: 2 }).slice(0, 4)}`;
+    await storage.append(SCOPE, KEY, enc.encode(raw));
+
+    const corrupted: number[] = [];
+    const out: Rec[] = [];
+    for await (const r of record.read<Rec>(SCOPE, KEY, {
+      onCorruptedLine: (lineNumber) => corrupted.push(lineNumber),
+    })) {
+      out.push(r);
+    }
+    expect(out).toEqual([{ n: 1 }]);
+    expect(corrupted).toEqual([]);
+  });
+
   it('reads across chunk boundaries (stream read splits lines)', async () => {
     const full = `${JSON.stringify({ n: 1 })}\n${JSON.stringify({ n: 2 })}\n${JSON.stringify({ n: 3 })}\n`;
     const bytes = enc.encode(full);
